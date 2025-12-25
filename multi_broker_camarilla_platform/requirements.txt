@@ -1,0 +1,14 @@
+
+cryptography>=43.0.0
+requests>=2.32.0
+pandas>=2.2.0
+numpy>=2.0.0
+python-dateutil>=2.9.0.post0
+pytz>=2024.1
+websockets>=13.0
+
+# Optional broker SDKs (install as needed for LIVE trading):
+kiteconnect>=5.0.0; python_version>="3.9"
+smartapi-python>=1.5.5; python_version>="3.9"
+pya3>=1.0.0; python_version>="3.9"
+NorenRestApiPy>=0.0.24; python_version>="3.9"
