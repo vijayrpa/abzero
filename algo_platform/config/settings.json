@@ -1,0 +1,20 @@
+{
+  "app": {
+    "name": "Algo Platform (India)",
+    "timezone": "Asia/Kolkata",
+    "log_level": "INFO"
+  },
+  "security": {
+    "credentials_file": "algo_platform/config/credentials.enc",
+    "kdf_iterations": 390000
+  },
+  "data": {
+    "contract_master_dir": "algo_platform/data/contract_master",
+    "trade_logs_dir": "algo_platform/data/trade_logs"
+  },
+  "paper": {
+    "fill_slippage_bps": 0,
+    "default_qty": 1
+  }
+}
+
