@@ -141,6 +141,9 @@ class PerSymbolState:
     status: str = "Stopped"
     last_status_msg: str = ""
     running: bool = False
+    # Re-arm flags to prevent duplicate immediate re-entries at same level.
+    buy_armed: bool = True
+    sell_armed: bool = True
 
 
 @dataclass

@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import replace
-from typing import Dict, Optional
+from typing import Optional
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
@@ -19,7 +18,9 @@ from algo_platform.models import (
 from algo_platform.risk.risk_manager import RiskManager
 from algo_platform.strategies.camarilla import compute_advanced_camarilla_levels
 from algo_platform.strategies.strategy_engine import StrategyEngine
+from algo_platform.utils.contract_master import ContractMaster
 from algo_platform.utils.excel_loader import load_manual_strategy_excel
+from algo_platform.utils.quantity_validator import QuantityValidator
 from algo_platform.utils.settings import Settings
 from algo_platform.websocket.tick_engine import TickEngine
 
@@ -118,7 +119,9 @@ class DashboardWindow(QtWidgets.QMainWindow):
         self._tick_engine = TickEngine(broker)
         self._om = OrderManager(broker, trade_logs_dir=settings.trade_logs_dir)
         self._risk = RiskManager()
-        self._engine = StrategyEngine(self._tick_engine, self._om, self._risk)
+        self._cm = ContractMaster(settings.contract_master_dir)
+        self._qty_validator = QuantityValidator(self._cm)
+        self._engine = StrategyEngine(self._tick_engine, self._om, self._risk, qty_validator=self._qty_validator)
 
         self.setWindowTitle(settings.app_name)
         self.resize(1500, 720)
@@ -192,7 +195,7 @@ class DashboardWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, "Camarilla Error", f"Failed to compute Camarilla levels: {e}")
             return
 
-        cfg = PerSymbolConfig(qty=1)
+        cfg = PerSymbolConfig(qty=int(dlg.qty.value()))
         row = StrategyRow(symbol=sym, strategy_type=StrategyType.CAMARILLA, levels=levels, config=cfg)
         row.state.running = True
         row.state.status = "Running"
@@ -387,6 +390,11 @@ class DashboardWindow(QtWidgets.QMainWindow):
 
         if "qty" in kwargs:
             cfg.qty = int(kwargs["qty"])
+            vd = self._qty_validator.validate(r.symbol, cfg.qty)
+            if not vd.ok:
+                r.state.last_status_msg = vd.message
+            elif vd.message:
+                r.state.last_status_msg = vd.message
         if "entry_type" in kwargs:
             cfg.entry_type = EntryType(kwargs["entry_type"])
         if "max_buy_trades" in kwargs:
@@ -426,7 +434,7 @@ class DashboardWindow(QtWidgets.QMainWindow):
             self._set_num(ridx, "Low", snap.low)
             self._set_num(ridx, "Prev Close", snap.prev_close)
 
-            pnl = self._om.paper_realized_pnl(r.symbol) + self._om.paper_unrealized_pnl(r.symbol, snap.ltp)
+            pnl = self._om.get_pnl(r.symbol, snap.ltp, r.config.trade_mode)
             self._set_text(ridx, "PnL", f"{pnl:.2f}")
             trades = r.state.buy_trades_done + r.state.sell_trades_done
             self._set_text(ridx, "Trades Count", str(trades))

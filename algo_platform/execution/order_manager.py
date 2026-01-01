@@ -105,6 +105,8 @@ class OrderManager:
         self._paper_positions: Dict[str, Position] = {}
         self._paper_orders: Dict[str, Order] = {}
         self._lock = threading.RLock()
+        self._real_positions_cache: Dict[str, Position] = {}
+        self._real_positions_cache_ts: float = 0.0
 
     def get_paper_positions(self) -> Dict[str, Position]:
         with self._lock:
@@ -123,6 +125,38 @@ class OrderManager:
         with self._lock:
             pos = self._paper_positions.get(symbol.key())
             return float(pos.realized_pnl) if pos else 0.0
+
+    def get_pnl(self, symbol: SymbolKey, ltp: float, trade_mode: TradeMode) -> float:
+        if trade_mode == TradeMode.PAPER:
+            return self.paper_realized_pnl(symbol) + self.paper_unrealized_pnl(symbol, ltp)
+        # REAL (best-effort)
+        pos = self._get_real_position(symbol)
+        if not pos or pos.net_qty == 0:
+            return 0.0
+        # Use broker-reported realized if available; compute unrealized from ltp + avg_price.
+        unreal = 0.0
+        if pos.net_qty > 0:
+            unreal = (ltp - pos.avg_price) * pos.net_qty
+        else:
+            unreal = (pos.avg_price - ltp) * abs(pos.net_qty)
+        return float(pos.realized_pnl) + float(unreal)
+
+    def _get_real_position(self, symbol: SymbolKey, max_age_s: float = 2.0) -> Optional[Position]:
+        now = time.time()
+        with self._lock:
+            if now - self._real_positions_cache_ts <= max_age_s and self._real_positions_cache:
+                return self._real_positions_cache.get(symbol.key())
+        try:
+            positions = self._broker.get_positions()
+        except Exception:
+            return None
+        m: Dict[str, Position] = {}
+        for p in positions:
+            m[p.symbol.key()] = p
+        with self._lock:
+            self._real_positions_cache = m
+            self._real_positions_cache_ts = now
+        return m.get(symbol.key())
 
     def _paper_pos(self, symbol: SymbolKey) -> Position:
         with self._lock:

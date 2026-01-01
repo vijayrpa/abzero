@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import threading
-from dataclasses import replace
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -15,6 +14,7 @@ from algo_platform.models import (
     SymbolKey,
 )
 from algo_platform.risk.risk_manager import RiskManager
+from algo_platform.utils.quantity_validator import QuantityValidator
 from algo_platform.websocket.tick_engine import TickEngine
 
 log = logging.getLogger(__name__)
@@ -28,10 +28,17 @@ class StrategyEngine:
     - Risk limits can stop per-symbol strategy and optionally force-exit
     """
 
-    def __init__(self, tick_engine: TickEngine, order_manager: OrderManager, risk: RiskManager) -> None:
+    def __init__(
+        self,
+        tick_engine: TickEngine,
+        order_manager: OrderManager,
+        risk: RiskManager,
+        qty_validator: Optional[QuantityValidator] = None,
+    ) -> None:
         self._tick_engine = tick_engine
         self._om = order_manager
         self._risk = risk
+        self._qty_validator = qty_validator
         self._rows: Dict[str, StrategyRow] = {}
         self._lock = threading.RLock()
 
@@ -67,6 +74,8 @@ class StrategyEngine:
             r = self._rows[row_key]
             r.state.buy_trades_done = 0
             r.state.sell_trades_done = 0
+            r.state.buy_armed = True
+            r.state.sell_armed = True
             r.active_trade = None
             self._risk.clear(r.symbol)
             r.state.running = True
@@ -130,6 +139,12 @@ class StrategyEngine:
             if not r.config.strategy_on or not r.state.running:
                 return
 
+            # Rearm logic to avoid duplicate trades at same level.
+            if not r.state.buy_armed and ltp < r.levels.buy_level:
+                r.state.buy_armed = True
+            if not r.state.sell_armed and ltp > r.levels.sell_level:
+                r.state.sell_armed = True
+
             # Manage active trade exits / trailing
             if r.active_trade:
                 self._update_trailing_and_exit(r, ltp)
@@ -138,17 +153,26 @@ class StrategyEngine:
             # Entry checks (no trade open)
             et = r.config.entry_type.value
             if et in ("Buy", "Both") and r.state.buy_trades_done < r.config.max_buy_trades:
-                if ltp >= r.levels.buy_level:
+                if r.state.buy_armed and ltp >= r.levels.buy_level:
                     self._enter(r, Side.BUY, ltp)
                     r.state.buy_trades_done += 1
+                    r.state.buy_armed = False
                     return
             if et in ("Sell", "Both") and r.state.sell_trades_done < r.config.max_sell_trades:
-                if ltp <= r.levels.sell_level:
+                if r.state.sell_armed and ltp <= r.levels.sell_level:
                     self._enter(r, Side.SELL, ltp)
                     r.state.sell_trades_done += 1
+                    r.state.sell_armed = False
                     return
 
     def _enter(self, r: StrategyRow, side: Side, ltp: float) -> None:
+        if self._qty_validator:
+            vd = self._qty_validator.validate(r.symbol, int(r.config.qty))
+            if not vd.ok:
+                r.state.last_status_msg = vd.message
+                return
+            if vd.message:
+                r.state.last_status_msg = vd.message
         if side == Side.BUY:
             sl = r.levels.buy_sl
             t1 = r.levels.buy_t1
