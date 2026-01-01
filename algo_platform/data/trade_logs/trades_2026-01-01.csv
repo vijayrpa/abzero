@@ -1,3 +1,5 @@
 ts,event,exchange,segment,symbol,side,qty,price,reason,strategy_type,trade_mode,extra
 2026-01-01 05:11:42,ENTRY,NSE,CASH,TEST,BUY,1,220.2336,Entry,Camarilla,Paper,
 2026-01-01 05:11:42,EXIT,NSE,CASH,TEST,SELL,1,220.3475,SL,Camarilla,Paper,
+2026-01-01 05:18:01,ENTRY,NSE,CASH,TEST2,BUY,1,269.7058,Entry,Camarilla,Paper,
+2026-01-01 05:18:01,EXIT,NSE,CASH,TEST2,SELL,1,269.8894,SL,Camarilla,Paper,

@@ -45,6 +45,8 @@ COLS = [
     "Entry Type",
     "Buy Count",
     "Sell Count",
+    "Exit @ T1",
+    "Exit @ T2",
     "Trailing SL",
     "Trail Value",
     "Strategy ON/OFF",
@@ -64,13 +66,21 @@ def _row_key(r: StrategyRow) -> str:
     return r.symbol.key() + "|" + r.strategy_type.value
 
 
-class AddSymbolDialog(QtWidgets.QDialog):
-    def __init__(self, parent: Optional[QtWidgets.QWidget] = None) -> None:
+class SymbolSearchDialog(QtWidgets.QDialog):
+    def __init__(self, contract_master: ContractMaster, parent: Optional[QtWidgets.QWidget] = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Add Symbol (Camarilla)")
-        self.setMinimumWidth(420)
+        self.setWindowTitle("Search & Add Symbol (Camarilla)")
+        self.setMinimumWidth(700)
+        self._cm = contract_master
 
-        self.symbol = QtWidgets.QLineEdit()
+        self.query = QtWidgets.QLineEdit()
+        self.query.setPlaceholderText("Type to search (requires contract master); e.g. SBIN, NIFTY, BANKNIFTY...")
+
+        self.results = QtWidgets.QListWidget()
+        self.results.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
+
+        self.manual_symbol = QtWidgets.QLineEdit()
+        self.manual_symbol.setPlaceholderText("Manual symbol (if not found) e.g. SBIN / NIFTY24JAN18000CE")
         self.exchange = QtWidgets.QComboBox()
         self.exchange.addItems(["NSE", "BSE", "NFO", "MCX", "CDS"])
         self.segment = QtWidgets.QComboBox()
@@ -85,8 +95,13 @@ class AddSymbolDialog(QtWidgets.QDialog):
         self.btn_ok.clicked.connect(self.accept)
         self.btn_cancel.clicked.connect(self.reject)
 
+        self.query.textChanged.connect(self._on_query)
+        self.results.itemDoubleClicked.connect(lambda *_: self.accept())
+
         form = QtWidgets.QFormLayout()
-        form.addRow("Symbol", self.symbol)
+        form.addRow("Search", self.query)
+        form.addRow("Matches", self.results)
+        form.addRow("Manual Symbol", self.manual_symbol)
         form.addRow("Exchange", self.exchange)
         form.addRow("Segment", self.segment)
         form.addRow("Qty", self.qty)
@@ -101,10 +116,23 @@ class AddSymbolDialog(QtWidgets.QDialog):
         root.addLayout(btns)
         self.setLayout(root)
 
-    def get(self) -> Optional[SymbolKey]:
+    def _on_query(self, text: str) -> None:
+        self.results.clear()
+        matches = self._cm.search(text, limit=100)
+        for sk in matches:
+            it = QtWidgets.QListWidgetItem(f"{sk.exchange}:{sk.segment}:{sk.tradingsymbol}")
+            it.setData(QtCore.Qt.ItemDataRole.UserRole, sk)
+            self.results.addItem(it)
+
+    def selected_symbol(self) -> Optional[SymbolKey]:
         if self.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return None
-        sym = self.symbol.text().strip().upper()
+        it = self.results.currentItem()
+        if it:
+            sk = it.data(QtCore.Qt.ItemDataRole.UserRole)
+            if isinstance(sk, SymbolKey):
+                return sk
+        sym = self.manual_symbol.text().strip().upper()
         if not sym:
             return None
         return SymbolKey(exchange=self.exchange.currentText(), segment=self.segment.currentText(), tradingsymbol=sym)
@@ -136,15 +164,21 @@ class DashboardWindow(QtWidgets.QMainWindow):
         toolbar = QtWidgets.QToolBar("Main")
         self.addToolBar(toolbar)
 
-        self.btn_add = QtWidgets.QAction("Add Camarilla Symbol", self)
+        self.btn_add = QtWidgets.QAction("Search/Add Camarilla Symbol", self)
         self.btn_excel = QtWidgets.QAction("Load Manual Excel", self)
         self.btn_exit_sel = QtWidgets.QAction("Manual Exit Selected", self)
+        self.btn_start_sel = QtWidgets.QAction("Start Selected", self)
+        self.btn_stop_sel = QtWidgets.QAction("Stop Selected", self)
+        self.btn_restart_sel = QtWidgets.QAction("Restart Selected", self)
         self.btn_start_ticks = QtWidgets.QAction("Start Ticks", self)
         self.btn_stop_ticks = QtWidgets.QAction("Stop Ticks", self)
         toolbar.addAction(self.btn_add)
         toolbar.addAction(self.btn_excel)
         toolbar.addSeparator()
         toolbar.addAction(self.btn_exit_sel)
+        toolbar.addAction(self.btn_start_sel)
+        toolbar.addAction(self.btn_stop_sel)
+        toolbar.addAction(self.btn_restart_sel)
         toolbar.addSeparator()
         toolbar.addAction(self.btn_start_ticks)
         toolbar.addAction(self.btn_stop_ticks)
@@ -152,6 +186,9 @@ class DashboardWindow(QtWidgets.QMainWindow):
         self.btn_add.triggered.connect(self.on_add_symbol)
         self.btn_excel.triggered.connect(self.on_load_excel)
         self.btn_exit_sel.triggered.connect(self.on_manual_exit_selected)
+        self.btn_start_sel.triggered.connect(self.on_start_selected)
+        self.btn_stop_sel.triggered.connect(self.on_stop_selected)
+        self.btn_restart_sel.triggered.connect(self.on_restart_selected)
         self.btn_start_ticks.triggered.connect(self._tick_engine.start)
         self.btn_stop_ticks.triggered.connect(self._tick_engine.stop)
 
@@ -183,9 +220,16 @@ class DashboardWindow(QtWidgets.QMainWindow):
         super().closeEvent(event)
 
     def on_add_symbol(self) -> None:
-        dlg = AddSymbolDialog(self)
-        sym = dlg.get()
+        dlg = SymbolSearchDialog(self._cm, self)
+        sym = dlg.selected_symbol()
         if not sym:
+            return
+
+        # Qty validation (lot sizes for derivatives).
+        qty = int(dlg.qty.value())
+        vd = self._qty_validator.validate(sym, qty)
+        if not vd.ok:
+            QtWidgets.QMessageBox.warning(self, "Quantity Error", vd.message)
             return
 
         try:
@@ -195,7 +239,7 @@ class DashboardWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, "Camarilla Error", f"Failed to compute Camarilla levels: {e}")
             return
 
-        cfg = PerSymbolConfig(qty=int(dlg.qty.value()))
+        cfg = PerSymbolConfig(qty=qty)
         row = StrategyRow(symbol=sym, strategy_type=StrategyType.CAMARILLA, levels=levels, config=cfg)
         row.state.running = True
         row.state.status = "Running"
@@ -237,6 +281,27 @@ class DashboardWindow(QtWidgets.QMainWindow):
             ltp = self._tick_engine.get_snapshot(sym).ltp
             if ltp:
                 self._engine.manual_exit(rk, ltp, reason="ManualMulti")
+
+    def on_start_selected(self) -> None:
+        sel = self.table.selectionModel().selectedRows()
+        for idx in sel:
+            rk = self._row_key_at_row(idx.row())
+            if rk:
+                self._engine.set_running(rk, True)
+
+    def on_stop_selected(self) -> None:
+        sel = self.table.selectionModel().selectedRows()
+        for idx in sel:
+            rk = self._row_key_at_row(idx.row())
+            if rk:
+                self._engine.set_running(rk, False)
+
+    def on_restart_selected(self) -> None:
+        sel = self.table.selectionModel().selectedRows()
+        for idx in sel:
+            rk = self._row_key_at_row(idx.row())
+            if rk:
+                self._engine.restart(rk)
 
     def _row_symbol_from_key(self, row_key: str) -> SymbolKey:
         # row_key format: exchange:segment:tradingsymbol|StrategyType
@@ -311,6 +376,17 @@ class DashboardWindow(QtWidgets.QMainWindow):
         self.table.setCellWidget(ridx, COLS.index("Sell Count"), sc)
 
         # Trailing
+        # Exit @ T1 / T2
+        ex1 = QtWidgets.QCheckBox()
+        ex1.setChecked(bool(row.config.exit_at_t1))
+        ex1.stateChanged.connect(lambda _, rk=rk: self._update_cfg(rk, exit_at_t1=ex1.isChecked()))
+        self.table.setCellWidget(ridx, COLS.index("Exit @ T1"), ex1)
+
+        ex2 = QtWidgets.QCheckBox()
+        ex2.setChecked(bool(row.config.exit_at_t2))
+        ex2.stateChanged.connect(lambda _, rk=rk: self._update_cfg(rk, exit_at_t2=ex2.isChecked()))
+        self.table.setCellWidget(ridx, COLS.index("Exit @ T2"), ex2)
+
         tr_on = QtWidgets.QCheckBox()
         tr_on.setChecked(bool(row.config.trailing_on))
         tr_on.stateChanged.connect(lambda _, rk=rk: self._update_cfg(rk, trailing_on=tr_on.isChecked()))
@@ -401,6 +477,10 @@ class DashboardWindow(QtWidgets.QMainWindow):
             cfg.max_buy_trades = int(kwargs["max_buy_trades"])
         if "max_sell_trades" in kwargs:
             cfg.max_sell_trades = int(kwargs["max_sell_trades"])
+        if "exit_at_t1" in kwargs:
+            cfg.exit_at_t1 = bool(kwargs["exit_at_t1"])
+        if "exit_at_t2" in kwargs:
+            cfg.exit_at_t2 = bool(kwargs["exit_at_t2"])
         if "trailing_on" in kwargs:
             cfg.trailing_on = bool(kwargs["trailing_on"])
         if "trail_value" in kwargs:
