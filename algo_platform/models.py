@@ -123,6 +123,11 @@ class PerSymbolConfig:
     entry_type: EntryType = EntryType.BOTH
     max_buy_trades: int = 1
     max_sell_trades: int = 1
+    # Re-entry / scaling controls:
+    # - rearm_buffer: points away from entry level needed to re-arm (retrace-based)
+    # - rearm_cooldown_s: seconds after last entry to re-arm (time-based scaling)
+    rearm_buffer: float = 0.0
+    rearm_cooldown_s: int = 0
     trailing_on: bool = False
     trail_value: float = 0.0
     strategy_on: bool = True
@@ -144,6 +149,8 @@ class PerSymbolState:
     # Re-arm flags to prevent duplicate immediate re-entries at same level.
     buy_armed: bool = True
     sell_armed: bool = True
+    last_buy_entry_time: Optional[datetime] = None
+    last_sell_entry_time: Optional[datetime] = None
 
 
 @dataclass

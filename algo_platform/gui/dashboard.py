@@ -45,6 +45,8 @@ COLS = [
     "Entry Type",
     "Buy Count",
     "Sell Count",
+    "Rearm Buffer",
+    "Rearm Cooldown(s)",
     "Exit @ T1",
     "Exit @ T2",
     "Trailing SL",
@@ -375,6 +377,20 @@ class DashboardWindow(QtWidgets.QMainWindow):
         sc.valueChanged.connect(lambda v, rk=rk: self._update_cfg(rk, max_sell_trades=v))
         self.table.setCellWidget(ridx, COLS.index("Sell Count"), sc)
 
+        # Rearm controls (re-entry / scaling)
+        rb = QtWidgets.QDoubleSpinBox()
+        rb.setDecimals(2)
+        rb.setRange(0.0, 1e9)
+        rb.setValue(float(row.config.rearm_buffer))
+        rb.valueChanged.connect(lambda v, rk=rk: self._update_cfg(rk, rearm_buffer=v))
+        self.table.setCellWidget(ridx, COLS.index("Rearm Buffer"), rb)
+
+        rcd = QtWidgets.QSpinBox()
+        rcd.setRange(0, 24 * 60 * 60)
+        rcd.setValue(int(row.config.rearm_cooldown_s))
+        rcd.valueChanged.connect(lambda v, rk=rk: self._update_cfg(rk, rearm_cooldown_s=v))
+        self.table.setCellWidget(ridx, COLS.index("Rearm Cooldown(s)"), rcd)
+
         # Trailing
         # Exit @ T1 / T2
         ex1 = QtWidgets.QCheckBox()
@@ -477,6 +493,10 @@ class DashboardWindow(QtWidgets.QMainWindow):
             cfg.max_buy_trades = int(kwargs["max_buy_trades"])
         if "max_sell_trades" in kwargs:
             cfg.max_sell_trades = int(kwargs["max_sell_trades"])
+        if "rearm_buffer" in kwargs:
+            cfg.rearm_buffer = float(kwargs["rearm_buffer"])
+        if "rearm_cooldown_s" in kwargs:
+            cfg.rearm_cooldown_s = int(kwargs["rearm_cooldown_s"])
         if "exit_at_t1" in kwargs:
             cfg.exit_at_t1 = bool(kwargs["exit_at_t1"])
         if "exit_at_t2" in kwargs:

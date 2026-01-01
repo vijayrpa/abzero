@@ -76,6 +76,8 @@ class StrategyEngine:
             r.state.sell_trades_done = 0
             r.state.buy_armed = True
             r.state.sell_armed = True
+            r.state.last_buy_entry_time = None
+            r.state.last_sell_entry_time = None
             r.active_trade = None
             self._risk.clear(r.symbol)
             r.state.running = True
@@ -140,10 +142,21 @@ class StrategyEngine:
                 return
 
             # Rearm logic to avoid duplicate trades at same level.
-            if not r.state.buy_armed and ltp < r.levels.buy_level:
-                r.state.buy_armed = True
-            if not r.state.sell_armed and ltp > r.levels.sell_level:
-                r.state.sell_armed = True
+            now = datetime.utcnow()
+            buf = float(r.config.rearm_buffer or 0.0)
+            cd = int(r.config.rearm_cooldown_s or 0)
+
+            if not r.state.buy_armed:
+                retrace_ok = ltp < (r.levels.buy_level - buf)
+                cooldown_ok = bool(cd > 0 and r.state.last_buy_entry_time and (now - r.state.last_buy_entry_time).total_seconds() >= cd)
+                if retrace_ok or cooldown_ok:
+                    r.state.buy_armed = True
+
+            if not r.state.sell_armed:
+                retrace_ok = ltp > (r.levels.sell_level + buf)
+                cooldown_ok = bool(cd > 0 and r.state.last_sell_entry_time and (now - r.state.last_sell_entry_time).total_seconds() >= cd)
+                if retrace_ok or cooldown_ok:
+                    r.state.sell_armed = True
 
             # Manage active trade exits / trailing
             if r.active_trade:
@@ -209,6 +222,10 @@ class StrategyEngine:
         )
         r.state.status = "Running"
         r.state.last_status_msg = f"Entered {side.value} @ {entry_px:.2f}"
+        if side == Side.BUY:
+            r.state.last_buy_entry_time = datetime.utcnow()
+        else:
+            r.state.last_sell_entry_time = datetime.utcnow()
         return True
 
     def _update_trailing_and_exit(self, r: StrategyRow, ltp: float) -> None:
