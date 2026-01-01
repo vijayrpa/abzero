@@ -252,9 +252,13 @@ class OrderManager:
         if trade_mode == TradeMode.PAPER:
             # Apply the opposite to flatten (paper), but log as EXIT with reason.
             pos = self._paper_pos(symbol)
-            signed = qty if exit_side == Side.BUY else -qty
             if pos.net_qty == 0:
                 return ExecResult(ok=False, message="No paper position to exit.")
+            # Clamp exit qty to current net position to prevent accidental flips.
+            exit_qty = min(int(qty), abs(int(pos.net_qty)))
+            if exit_qty <= 0:
+                return ExecResult(ok=False, message="Invalid exit qty.")
+            signed = exit_qty if exit_side == Side.BUY else -exit_qty
 
             closing_qty = min(abs(pos.net_qty), abs(signed))
             if pos.net_qty > 0 and signed < 0:
@@ -265,13 +269,14 @@ class OrderManager:
             if pos.net_qty == 0:
                 pos.avg_price = 0.0
             else:
+                # Should not happen due to clamping; keep safe anyway.
                 pos.avg_price = ltp
 
             self._logger.log_event(
                 event="EXIT",
                 symbol=symbol,
                 side=exit_side,
-                qty=qty,
+                qty=exit_qty,
                 price=ltp,
                 reason=reason,
                 strategy_type=strategy_type,

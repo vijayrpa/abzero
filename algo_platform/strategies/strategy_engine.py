@@ -120,7 +120,7 @@ class StrategyEngine:
                 return
 
             # Risk evaluation
-            pnl_total = self._om.paper_realized_pnl(r.symbol) + self._om.paper_unrealized_pnl(r.symbol, ltp)
+            pnl_total = self._om.get_pnl(r.symbol, ltp, r.config.trade_mode)
             rd = self._risk.evaluate(
                 symbol=r.symbol,
                 risk_on=r.config.risk_on,
@@ -154,23 +154,23 @@ class StrategyEngine:
             et = r.config.entry_type.value
             if et in ("Buy", "Both") and r.state.buy_trades_done < r.config.max_buy_trades:
                 if r.state.buy_armed and ltp >= r.levels.buy_level:
-                    self._enter(r, Side.BUY, ltp)
-                    r.state.buy_trades_done += 1
-                    r.state.buy_armed = False
+                    if self._enter(r, Side.BUY, ltp):
+                        r.state.buy_trades_done += 1
+                        r.state.buy_armed = False
                     return
             if et in ("Sell", "Both") and r.state.sell_trades_done < r.config.max_sell_trades:
                 if r.state.sell_armed and ltp <= r.levels.sell_level:
-                    self._enter(r, Side.SELL, ltp)
-                    r.state.sell_trades_done += 1
-                    r.state.sell_armed = False
+                    if self._enter(r, Side.SELL, ltp):
+                        r.state.sell_trades_done += 1
+                        r.state.sell_armed = False
                     return
 
-    def _enter(self, r: StrategyRow, side: Side, ltp: float) -> None:
+    def _enter(self, r: StrategyRow, side: Side, ltp: float) -> bool:
         if self._qty_validator:
             vd = self._qty_validator.validate(r.symbol, int(r.config.qty))
             if not vd.ok:
                 r.state.last_status_msg = vd.message
-                return
+                return False
             if vd.message:
                 r.state.last_status_msg = vd.message
         if side == Side.BUY:
@@ -191,7 +191,7 @@ class StrategyEngine:
         )
         if not res.ok:
             r.state.last_status_msg = res.message
-            return
+            return False
         entry_px = res.fill_price or ltp
         r.active_trade = ActiveTrade(
             symbol=r.symbol,
@@ -209,6 +209,7 @@ class StrategyEngine:
         )
         r.state.status = "Running"
         r.state.last_status_msg = f"Entered {side.value} @ {entry_px:.2f}"
+        return True
 
     def _update_trailing_and_exit(self, r: StrategyRow, ltp: float) -> None:
         tr = r.active_trade
