@@ -67,6 +67,9 @@ class StrategyEngine:
             r.state.status = "Running" if running else "Stopped"
             r.state.last_status_msg = ""
             if running:
+                # When user turns strategy ON, allow immediate evaluation/entry.
+                r.state.buy_armed = True
+                r.state.sell_armed = True
                 self._risk.clear(r.symbol)
 
     def restart(self, row_key: str) -> None:

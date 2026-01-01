@@ -16,6 +16,10 @@ def main() -> int:
     settings_path = os.path.join(repo_root, "algo_platform", "config", "settings.json")
     settings = load_settings(settings_path)
 
+    # Ensure data dirs exist early.
+    os.makedirs(settings.contract_master_dir, exist_ok=True)
+    os.makedirs(settings.trade_logs_dir, exist_ok=True)
+
     setup_logging(log_dir=settings.trade_logs_dir, level=settings.log_level)
 
     app = QtWidgets.QApplication(sys.argv)
